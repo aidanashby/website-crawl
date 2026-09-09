@@ -286,3 +286,7 @@ the site, diagnose SEO problems, and propose a plan of action.
   flagged `lazy_loaded`, and its link counts are a floor rather than a total, so
   its targets may look like orphans when they are not.
 - **`.obsidian/` is not tracked**, so vault settings can differ between machines.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).

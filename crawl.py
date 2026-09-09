@@ -34,7 +34,9 @@ from bs4 import BeautifulSoup
 from markdownify import markdownify as html_to_md
 
 HERE = Path(__file__).parent
-USER_AGENT = "website-crawl/1.0 (personal site mapping)"
+# Identifies the crawler to site owners reading their logs, and points them at
+# something they can look up. Convention for a published crawler.
+USER_AGENT = "website-crawl/1.0 (+https://github.com/aidanashby/website-crawl)"
 DEFAULT_DELAY = 1.0
 DEFAULT_MAX_PAGES = 500
 FETCH_ESTIMATE = 0.4      # typical seconds per request, for the up-front estimate only
@@ -224,6 +226,25 @@ def days_since(iso_date):
         return (date.today() - date.fromisoformat(iso_date[:10])).days
     except ValueError:
         return None
+
+
+ASSET_EXTENSIONS = {
+    "jpg", "jpeg", "png", "gif", "webp", "svg", "avif", "ico", "bmp",
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv",
+    "zip", "gz", "mp3", "mp4", "mov", "avi", "wav", "webm",
+}
+
+
+def is_asset(url):
+    """A file rather than a page, judged by extension."""
+    last = urllib.parse.urlsplit(url).path.rsplit("/", 1)[-1]
+    return "." in last and last.rsplit(".", 1)[-1].lower() in ASSET_EXTENSIONS
+
+
+# A meta description that is really a block of inline script. Seen live on a
+# donation page whose CAF widget loader landed in the description tag: the page
+# then advertises itself in search results with "var caf_BeneficiaryCampaignId".
+SCRIPT_IN_TEXT = re.compile(r"var\s+\w+\s*=|document\.write|function\s*\(|<script", re.I)
 
 
 def is_noindex(entry):
@@ -633,6 +654,12 @@ def build_graph(manifest, home_url):
             "links_in_nav": nav_in,
             "click_depth": depth.get(u),
             "orphan": not content_in and u != home_url,
+            # "Orphan" carries a strong meaning in SEO - unreachable - and this is
+            # not that. A page with no body links in but 125 menu links in is
+            # perfectly reachable and merely uncited, which is a different problem
+            # with a different fix. Say which it is, next to the flag.
+            "orphan_reason": (None if content_in or u == home_url
+                              else "nav_only" if nav_in else "no_inbound_links"),
             "index_page": u in index_pages,
         }
     return graph, boilerplate, resolve
@@ -719,7 +746,13 @@ def render_note(entry, graph_entry, manifest, resolve, boilerplate):
                   if not resolve(l["url"]) and l["url"].startswith("http")]
     host = urllib.parse.urlsplit(entry["url"]).netloc
     site = bare_host(host)
-    uncrawled = dedupe([l for l in unresolved if same_site(l["url"], site)], lambda l: l["url"])
+    internal_unresolved = dedupe([l for l in unresolved if same_site(l["url"], site)],
+                                 lambda l: l["url"])
+    # Most of these are images and PDFs, not pages: on one site 35 of 42 were file
+    # assets. Mixed together they bury the handful that are real page links worth
+    # looking at.
+    assets = [l for l in internal_unresolved if is_asset(l["url"])]
+    uncrawled = [l for l in internal_unresolved if not is_asset(l["url"])]
     external = dedupe([l for l in unresolved if not same_site(l["url"], site)], lambda l: l["url"])
     content_out = [] if graph_entry.get("index_page") else dedupe(
         [l for l in internal
@@ -737,6 +770,8 @@ def render_note(entry, graph_entry, manifest, resolve, boilerplate):
     fm["links_in_nav"] = len(graph_entry["links_in_nav"])
     fm["click_depth"] = graph_entry["click_depth"]
     fm["orphan"] = graph_entry["orphan"]
+    fm["orphan_reason"] = graph_entry.get("orphan_reason")
+    fm["is_section_landing"] = m.get("is_section_landing")
 
     lines = ["---"]
     for k, v in fm.items():
@@ -784,8 +819,10 @@ def render_note(entry, graph_entry, manifest, resolve, boilerplate):
     lines += [link_line(l, True) for l in content_out] or ["- none"]
     lines.append(f"\n### In nav and footer ({len(nav_out)})")
     lines += [link_line(l, False) for l in nav_out] or ["- none"]
-    lines.append(f"\n### Internal, no note in this vault ({len(uncrawled)})")
+    lines.append(f"\n### Internal pages, no note in this vault ({len(uncrawled)})")
     lines += [link_line(l, False) for l in uncrawled] or ["- none"]
+    lines.append(f"\n### Files (images, PDFs) ({len(assets)})")
+    lines += [link_line(l, False) for l in assets] or ["- none"]
     lines.append(f"\n### External ({len(external)})")
     lines += [link_line(l, False) for l in external] or ["- none"]
 
@@ -801,8 +838,16 @@ def render_note(entry, graph_entry, manifest, resolve, boilerplate):
 # -------------------------------------------------------------------------- report
 
 def write_report(path, manifest, graph, dead_links, redirects, gone, partial=False,
-                 failed=(), gone_deleted=True):
-    L = ["# Crawl report", f"\n_{date.today().isoformat()} - {len(manifest)} pages_\n"]
+                 failed=(), gone_deleted=True, stale_links=(), mode="lean",
+                 sitemap_urls=()):
+    L = ["# Crawl report",
+         f"\n_{date.today().isoformat()} - {len(manifest)} pages - "
+         # Whether the crawl stored full body text decides what any reader can
+         # actually judge: in lean mode you can measure how much writing a page
+         # has, never how good it is. That was not discoverable anywhere before.
+         f"{'full text stored' if mode == 'full' else 'lean (excerpts only, no body text)'}_\n"]
+    if sitemap_urls:
+        L.append(f"\n_Sitemaps used: {', '.join(sitemap_urls)}_\n")
     if partial:
         L.append("\n> **Partial run.** The crawl stopped early, so this covers only the\n"
                  "> pages fetched so far. Run again to carry on where it stopped.\n")
@@ -892,6 +937,14 @@ def write_report(path, manifest, graph, dead_links, redirects, gone, partial=Fal
     section("Click depth over 3", [f"{link(u)} - {g['click_depth']}" for u, g in graph.items() if g["click_depth"] and g["click_depth"] > 3])
     section("Unreachable from homepage", [link(u) for u, g in graph.items() if g["click_depth"] is None])
     section("Broken internal links", [f"{src} → {tgt} ({status})" for src, tgt, status in dead_links])
+    # Links to an old URL that still 301s. They work, so nothing looks wrong, but
+    # every one is a link the site is choosing not to point straight at.
+    section("Internal links pointing at a redirect",
+            [f"{frm} → {to}" for frm, to in stale_links])
+    section("Meta description contains script, not prose",
+            [f"{link(u)} - {(e['meta']['meta_description'] or '')[:60]}..."
+             for u, e in manifest.items()
+             if e["meta"]["meta_description"] and SCRIPT_IN_TEXT.search(e["meta"]["meta_description"])])
     section("Redirect chains", [f"{frm} → {to}" for frm, to in redirects])
     section("No structured data", [link(u) for u, e in manifest.items() if not e["meta"]["schema_types"]])
     section("Images missing alt text", [f"{link(u)} - {e['meta']['images_missing_alt']}" for u, e in manifest.items() if e["meta"]["images_missing_alt"]])
@@ -1205,6 +1258,20 @@ def main():
             rel = f"{stem}-{hashlib.sha256(u.encode()).hexdigest()[:8]}.{ext}"
             collisions += 1
         taken[rel] = u
+        # `section` needs the whole corpus, so it is finalised here rather than in
+        # extract(). A section's own landing page belongs in that section: giving
+        # /housing/ the section "(root)" while /housing/barstaple-house/ got
+        # "housing" split a section from its own front door and dumped the landing
+        # page in with every root-level post.
+        path = urllib.parse.urlsplit(u).path.strip("/")
+        segments = [s for s in path.split("/") if s]
+        landing = path in parents
+        manifest[u]["meta"]["is_section_landing"] = landing or None
+        manifest[u]["meta"]["section"] = (
+            "(home)" if not segments
+            else segments[-1] if landing
+            else segments[0] if len(segments) > 1
+            else "(root)")
         was = manifest[u].get("file")
         if was and was != rel:
             renamed.append(was)
@@ -1237,7 +1304,7 @@ def main():
             n = normalise_url(l["url"])
             if same_site(n, root_host) and not resolve(n) and n.startswith("http") and not is_archive(n):
                 candidates.add(n)
-    dead_links = []
+    dead_links, stale_links = [], []
     if candidates:
         print(f"  Checking {len(candidates)} internal link target(s) not in the crawl set"
               f" (about {human_time(len(candidates) * (delay + FETCH_ESTIMATE))})...", flush=True)
@@ -1255,6 +1322,10 @@ def main():
             if hr.status_code >= 400:
                 src = next((u for u, e in manifest.items() if any(normalise_url(l["url"]) == target for l in e["links"])), "?")
                 dead_links.append((src, target, hr.status_code))
+            elif normalise_url(hr.url) != target and not is_asset(target):
+                # Works, so nothing looks broken, but the site is linking to an
+                # old URL and leaning on a redirect to fix it.
+                stale_links.append((target, normalise_url(hr.url)))
         except requests.RequestException:
             pass
         time.sleep(delay)
@@ -1301,7 +1372,8 @@ def main():
     # reads like two separate problems.
     still_failing = [(u, why) for u, why in failed if u not in vanished]
     write_report(domain_dir / "REPORT.md", manifest, graph, dead_links, redirects,
-                 gone, aborted, still_failing, gone_deleted=not args.keep_gone)
+                 gone, aborted, still_failing, gone_deleted=not args.keep_gone,
+                 stale_links=stale_links, mode=mode, sitemap_urls=sitemap_urls)
     checkpoint()
 
     orphans = sum(1 for g in graph.values() if g["orphan"])

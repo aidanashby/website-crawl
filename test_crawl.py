@@ -376,7 +376,7 @@ def test_uncrawled_internal_links_are_not_called_external():
     manifest, graph, boilerplate, resolve = _tiny_corpus()
     u = "https://example.com/blog/winter-appeal/"
     note = crawl.render_note(manifest[u], graph[u], manifest, resolve, boilerplate)
-    uncrawled = note.split("### Internal, no note in this vault")[1].split("### External")[0]
+    uncrawled = note.split("### Internal pages, no note in this vault")[1].split("### Files")[0]
     ext = note.split("### External")[1].split("## Linked from")[0]
     assert "https://example.com/about/" in uncrawled
     assert "https://example.com/about/" not in ext
@@ -653,3 +653,79 @@ def test_report_survives_pruned_urls_missing_from_the_manifest(tmp_path):
     out = tmp_path / "REPORT.md"
     crawl.write_report(out, manifest, graph, [], [], [dropped])   # must not raise
     assert dropped in out.read_text("utf-8")       # only under "removed upstream"
+
+
+def test_is_asset():
+    assert crawl.is_asset("https://example.com/wp-content/uploads/a.jpg")
+    assert crawl.is_asset("https://example.com/report.PDF")
+    assert not crawl.is_asset("https://example.com/about/")
+    assert not crawl.is_asset("https://example.com/a.b.page/")
+
+
+def test_assets_split_out_of_the_uncrawled_page_list():
+    # 35 of 42 uncrawled internal links on one real site were images, burying the
+    # handful that were real page links.
+    manifest, graph, boilerplate, resolve = _tiny_corpus()
+    u = "https://example.com/blog/winter-appeal/"
+    manifest[u]["links"] += [
+        {"url": "https://example.com/wp-content/uploads/photo.jpg", "region": "content",
+         "anchor": "a photo", "nofollow": False},
+    ]
+    graph, boilerplate, resolve = crawl.build_graph(manifest, "https://example.com/")
+    note = crawl.render_note(manifest[u], graph[u], manifest, resolve, boilerplate)
+    pages = note.split("### Internal pages, no note in this vault")[1].split("### Files")[0]
+    files = note.split("### Files (images, PDFs)")[1].split("## Linked from")[0]
+    assert "photo.jpg" in files and "photo.jpg" not in pages
+    assert "/about/" in pages
+
+
+def test_orphan_reason_distinguishes_nav_only_from_unreachable():
+    manifest = {
+        "https://example.com/": {
+            "url": "https://example.com/", "file": "home.md", "meta": {"title": "Home"},
+            "links": [{"url": "https://example.com/nav-only/", "region": "nav", "anchor": "N"}],
+        },
+        "https://example.com/nav-only/": {
+            "url": "https://example.com/nav-only/", "file": "nav-only.md",
+            "meta": {"title": "Nav only"}, "links": [],
+        },
+        "https://example.com/unlinked/": {
+            "url": "https://example.com/unlinked/", "file": "unlinked.md",
+            "meta": {"title": "Unlinked"}, "links": [],
+        },
+    }
+    graph, _, _ = crawl.build_graph(manifest, "https://example.com/")
+    assert graph["https://example.com/nav-only/"]["orphan_reason"] == "nav_only"
+    assert graph["https://example.com/unlinked/"]["orphan_reason"] == "no_inbound_links"
+    assert graph["https://example.com/"]["orphan_reason"] is None
+
+
+def test_report_header_states_the_crawl_mode(tmp_path):
+    # Without this there is no way to know whether body text was stored, so no
+    # way to know whether page quality can be judged at all.
+    manifest, graph, _, _ = _tiny_corpus()
+    out = tmp_path / "REPORT.md"
+    crawl.write_report(out, manifest, graph, [], [], [], mode="lean")
+    assert "lean (excerpts only, no body text)" in out.read_text("utf-8")
+    crawl.write_report(out, manifest, graph, [], [], [], mode="full")
+    assert "full text stored" in out.read_text("utf-8")
+
+
+def test_report_flags_script_in_meta_description(tmp_path):
+    # Seen live: a donation widget's loader script landed in the description tag.
+    manifest, graph, _, _ = _tiny_corpus()
+    u = "https://example.com/"
+    manifest[u]["meta"]["meta_description"] = (
+        "var caf_BeneficiaryCampaignId=3439;document.write(unescape('%3Cscript'))")
+    out = tmp_path / "REPORT.md"
+    crawl.write_report(out, manifest, graph, [], [], [])
+    text = out.read_text("utf-8")
+    assert "Meta description contains script, not prose (1)" in text
+
+
+def test_report_lists_internal_links_that_redirect(tmp_path):
+    manifest, graph, _, _ = _tiny_corpus()
+    out = tmp_path / "REPORT.md"
+    crawl.write_report(out, manifest, graph, [], [], [], stale_links=[
+        ("https://example.com/old/", "https://example.com/new/")])
+    assert "Internal links pointing at a redirect (1)" in out.read_text("utf-8")

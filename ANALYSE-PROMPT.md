@@ -18,6 +18,22 @@ chat transcript.
 I have crawled a website into the folder at `<PATH>`. I would like you to
 explore it, diagnose its SEO problems, and propose a plan of action.
 
+## What the site is for
+
+Everything you recommend depends on what this organisation is actually trying to
+achieve, so establish that before you start rather than inferring it from the
+pages alone.
+
+Use whatever context you already have: project instructions, reference documents,
+brand or strategy files, and anything I have told you in this conversation. If
+this is running inside a project set up for the organisation, that material is
+the authority, and it outranks what you infer from the crawl.
+
+If you genuinely have none of that, do not stop and do not ask. Work out the
+likely priority order from the site itself, **state it in one line at the top of
+your report**, and flag that the recommendations rest on it. Say plainly if a
+different priority order would change your answer.
+
 Read **What I would like** at the end before you start: it sets the shape of the
 report, and the shape matters as much as the findings. Lead with conclusions and
 put the detail underneath.
@@ -43,11 +59,13 @@ Two generated files sit alongside the notes:
   frequency. Treat it as a starting point, not a finding. Verify anything you
   intend to report against the notes themselves.
 
-  Every section of the report covers **indexable pages only**. Pages carrying
-  `noindex` are held back and listed once at the end, because the site has said
-  they are not part of its search presence. Take that as authoritative: do not
-  raise a missing meta description or thin content on a noindex page. If you
-  think a page is wrongly marked `noindex`, say so as its own finding.
+  Its first line states the crawl date, the page count, and **whether body text
+  was stored**. In lean mode you can measure how much writing a page has, never
+  how good it is, so do not judge quality of prose you cannot see.
+
+  Every section covers indexable pages only; `noindex` pages are listed once at
+  the end and are not faults to report. Say so if you think one is wrongly
+  marked.
 - `manifest.json` is the crawler's own record, keyed by final URL. Useful for
   bulk questions across every page at once, and faster to read than opening
   hundreds of notes.
@@ -71,7 +89,7 @@ Every note starts with YAML frontmatter. The fields you will care about:
 | `links_out_content` | Links from the body text. This is the meaningful editorial number. |
 | `links_out_nav` | Links from nav, header, footer and sidebar. |
 | `links_out_external` | Links leaving the site. |
-| `links_in_content` | Body-text links pointing at this page from elsewhere on the site. The internal-link-equity number. |
+| `links_in_content` | How many *other pages* link here from body text. Counted once per source page, so a listing page linking to a post three times as image, title and "read more" counts as one. |
 | `links_out_uncrawled` | Links to this site that have no note here. Present only when there are some. |
 | `links_nofollow` | Outbound links marked `rel="nofollow"`. |
 | `section` | Top-level URL folder, for grouping. `(root)` for a top-level page, `(home)` for the homepage. |
@@ -81,7 +99,9 @@ Every note starts with YAML frontmatter. The fields you will care about:
 | `lazy_loaded` | Set when the page loads content with JavaScript. Its link and word counts are a floor, not a total. Do not report its link targets as orphans without checking. |
 | `links_in_nav` | Nav links pointing here. |
 | `click_depth` | Clicks from the homepage. Absent means unreachable by internal links. |
-| `orphan` | True when nothing links to it from body content. |
+| `orphan` | True when no *body copy* links to it. **Not** the usual SEO sense: an orphan here can still sit in the main menu on every page and be perfectly reachable. Read `orphan_reason` before treating it as a problem. |
+| `orphan_reason` | `nav_only` (reachable through the menu, just never cited in anyone's copy) or `no_inbound_links` (genuinely stranded). Only the second is an orphan in the usual sense. |
+| `is_section_landing` | The front page of a section, e.g. `/housing/`. |
 
 Below the frontmatter: the page heading, an excerpt (or the full body if the
 crawl used `--full-text`), an **Outline** of the H2 and H3 headings, a **Links
@@ -161,32 +181,36 @@ The whole report goes in **one self-contained Markdown document that I can save
 and hand to a colleague**, not spread across chat messages. Use whichever of
 these fits the tool you are running in:
 
-- **Claude (app or web)**: create it as a single Markdown **Artifact**. If you
-  revise it, update that same artifact rather than making a second one.
-- **ChatGPT**: put it in a **Canvas**, and also write it to a **downloadable
-  `.md` file** and give me the download link. I want the file, not just the
-  canvas.
-- **Any assistant with direct file access** (Claude Code, an IDE agent, a local
-  tool): **write the file to disk** inside the crawled folder and tell me the
-  path.
-- **Anything else**: output the whole thing as one fenced Markdown code block I
-  can copy in a single go.
+Take the **first** of these that you can actually do. More than one may apply;
+the earlier one wins.
 
-Name it `SEO-REVIEW-<domain>-<YYYY-MM-DD>.md`, for example
+1. **You can write files directly** (Claude Code, an IDE agent, a local tool):
+   write it to disk in the folder above and tell me the path. This beats an
+   artifact or a canvas even when you could do those too.
+2. **Claude (app or web)**: create it as a single Markdown **Artifact**. If you
+   revise it, update that same artifact rather than making a second one.
+3. **ChatGPT**: put it in a **Canvas**, and also write it to a **downloadable
+   `.md` file** and give me the download link. I want the file, not just the
+   canvas.
+4. **Anything else**: output the whole thing as one fenced Markdown code block I
+   can copy in a single go.
+
+Name it `SEO-REVIEW-<domain>-<crawl date>.md`, taking the crawl date from the
+line at the top of `REPORT.md`, not today's date. For example
 `SEO-REVIEW-example.com-2026-09-09.md`.
 
 Three rules for the file itself:
 
 - **Plain Markdown.** No HTML, no wikilinks, no `[[double brackets]]`. Cite
   pages as their note path and URL in plain text. The vault's own `REPORT.md`
-  does the same, for the same reason: a wikilink would drag the report into
-  Obsidian's graph and make it the largest hub there, drowning the site
-  structure the graph exists to show.
+  does the same, for the same reason: a wikilink would distort the very graph
+  the report is describing.
 - **Self-contained.** It will be read on its own, away from this conversation,
   so it needs to make sense without it. Name the site and the crawl date at the
   top.
-- **Do not repeat it in chat.** In the chat itself, give me only the file's
-  name or link plus the Verdict paragraph. Everything else lives in the file.
+- **Do not repeat it in chat.** In the chat itself, give me only the file's name
+  or link, the Verdict, and the "Fix this week" table, since that is the part I
+  will act on today. Everything else lives in the file.
 
 ## What I would like
 
@@ -204,28 +228,39 @@ are about to say.
 **1. Verdict.** Five sentences at most. What kind of shape is this site in, what
 is the single biggest problem, and what is the one thing I should do first.
 
-**2. Fix this week.** At most five items, as a table: what to do, where, why it
-matters, and roughly how long. Only things that are genuinely quick, safe and
-clearly worth doing. If something is quick but you are not confident it helps,
-it goes lower down instead.
+**2. The shape of the problem.** One paragraph, and only if it earns its place.
+Sites often have one underlying problem showing up in a dozen ways. If that is
+true here, name the cause plainly, and say which of the findings below are
+symptoms of it. If the problems really are unrelated, write "no single cause"
+and move on. Do not manufacture a theme that is not there.
 
-**3. Bigger decisions.** At most five, as a short list. Work that needs planning,
-a judgement call, or someone else's agreement. One line each on what the choice
-actually is. Do not pre-empt my decision, but do say what you would pick.
+**3. Fix this week.** At most five items, as a table: what to do, where, why it
+matters, and roughly how long. "Roughly how long" means my own time editing in
+WordPress, not a developer's. Only things genuinely quick, safe and clearly worth
+doing; if something is quick but you are unsure it helps, put it lower down.
 
-**4. What is fine.** Three or four lines. Genuinely say what is working, so I
-know where not to spend effort. If something the report flags is not actually a
+**4. Bigger decisions.** Work that needs planning, a judgement call, or someone
+else's agreement. One line each on what the choice actually is. Aim for five,
+but if this site's value sits here rather than in the quick wins, say so and use
+as many as it needs. Do not pre-empt my decision, but do say what you would
+pick.
+
+**5. What is fine.** A short paragraph. Genuinely say what is working, so I know
+where not to spend effort. If something the report flags is not actually a
 problem, this is where to say so.
 
-Everything above is the headline, and should fit on the file's first screen.
-Then:
+Everything above is the headline, and should fit on the file's first screen or
+two. Then:
 
-**5. The detail.** The full findings, grouped by theme rather than by report
+**6. The detail.** The full findings, grouped by theme rather than by report
 section, with evidence cited by note path so I can check it. Order the themes by
 how much they matter, not by how much you have to say about them. For each
-finding, be clear whether you are confident or inferring.
+finding, be clear whether you are confident or inferring, and **end it with what
+to do**: the change, the pages affected, the rough effort, and what improvement
+you expect. The plan lives here, attached to its evidence, rather than in a
+separate section that repeats it.
 
-**6. What I could not tell from this data.** What you would need in order to
+**7. What I could not tell from this data.** What you would need in order to
 answer the questions the crawl cannot: traffic, rankings, conversions, backlinks,
 search-console data, or knowledge of the organisation's priorities.
 
@@ -234,14 +269,13 @@ search-console data, or knowledge of the organisation's priorities.
 - **Rank by consequence, not by count.** Forty pages missing a meta description
   is one finding, not forty. A single wrong page title on the main service page
   can matter more than a hundred cosmetic issues, and should sit above them.
-- **Say how big the problem is**, in the site's own terms: how many pages, and
-  what share of the site.
-- **Never pad a section to fill it.** Two real quick wins beats five with three
-  invented. If a section is genuinely empty, say so in a line and move on.
-- **No generic SEO advice.** Everything must point at something in this vault.
-  If a recommendation would apply unchanged to any website, cut it.
-- Assume I know the site well and understand SEO basics, so skip the definitions
-  and skip explaining why meta descriptions matter.
+  Give the size of each problem in the site's own terms: how many pages, and what
+  share of the site.
+- **No generic SEO advice.** Everything must point at something in this vault. If
+  a recommendation would apply unchanged to any website, cut it. Assume I know
+  the site and understand SEO basics.
+- **Never pad a section to fill it.** If a section is genuinely empty, say so in
+  one line and move on.
 - British English, plain language, short paragraphs.
 
 ### The three tasks themselves

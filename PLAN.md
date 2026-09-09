@@ -32,6 +32,7 @@ website-crawl/
 ├── venv/
 ├── README.md
 ├── PLAN.md
+├── LICENSE                 MIT
 ├── ANALYSE-PROMPT.md       prompt for handing a crawled vault to Claude
 └── crawled/
     └── example.com/
