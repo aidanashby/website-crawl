@@ -2,3 +2,7 @@ venv/
 __pycache__/
 *.pyc
 **/.obsidian/
+
+# Crawled vaults: site content, not source. Can be large, and re-derivable by
+# re-running the crawl.
+crawled/
