@@ -34,9 +34,10 @@ from bs4 import BeautifulSoup
 from markdownify import markdownify as html_to_md
 
 HERE = Path(__file__).parent
+__version__ = "1.0.0"        # single source of truth; the user agent derives from it
 # Identifies the crawler to site owners reading their logs, and points them at
 # something they can look up. Convention for a published crawler.
-USER_AGENT = "website-crawl/1.0 (+https://github.com/aidanashby/website-crawl)"
+USER_AGENT = f"website-crawl/{__version__} (+https://github.com/aidanashby/website-crawl)"
 DEFAULT_DELAY = 1.0
 DEFAULT_MAX_PAGES = 500
 FETCH_ESTIMATE = 0.4      # typical seconds per request, for the up-front estimate only
@@ -56,6 +57,14 @@ BOILERPLATE_RATIO = 0.50
 # menu one. Region tagging still applies at any size.
 BOILERPLATE_MIN_PAGES = 10
 MAX_PAGINATION_PAGES = 200   # ceiling on the pagination pass, per crawl
+# A page whose content links reach more than this share of the site is a listing:
+# a news index, an archive page, an A-Z. Its links are real and stay in the graph,
+# but "linked from the page that lists everything" is not the same as "another
+# page thought this worth citing", and conflating them hid the main finding on a
+# real site: 26 orphans reported, while 82 more pages were cited by nothing except
+# the news index.
+LISTING_RATIO = 0.25
+NAV_LIST_CAP = 10            # nav backlinks shown per note before "and N more"
 THIN_WORDS = 300
 TITLE_MAX = 60
 DESC_MIN, DESC_MAX = 70, 160   # Google truncates around 160; under 70 wastes the slot
@@ -623,6 +632,18 @@ def build_graph(manifest, home_url):
     # all-pages index NOT called "sitemap" will still show up as a hub.
     index_pages = {u for u in manifest if is_sitemap(u)}
 
+    # Listing pages, for measurement only. Unlike index_pages these keep their
+    # graph edges: a news index linking to its posts is real structure and the
+    # user asked to see it. What changes is that a citation *from* one no longer
+    # counts as evidence that anybody thought the page worth linking to.
+    listings = set()
+    if total >= BOILERPLATE_MIN_PAGES:
+        for u, e in manifest.items():
+            reach = {t for t in (resolve(l["url"]) for l in e["links"]
+                                 if l["region"] == "content") if t and t != u}
+            if len(reach) / total > LISTING_RATIO or e["meta"].get("is_section_landing"):
+                listings.add(u)
+
     inbound = {u: {"content": [], "nav": []} for u in manifest}
     for u, e in manifest.items():
         for link in e["links"]:
@@ -661,6 +682,11 @@ def build_graph(manifest, home_url):
             "orphan_reason": (None if content_in or u == home_url
                               else "nav_only" if nav_in else "no_inbound_links"),
             "index_page": u in index_pages,
+            "listing_page": u in listings,
+            # Citations from anything other than a listing. This is the number
+            # that answers "does the rest of the site know this page exists".
+            "links_in_content_non_listing": sorted(set(content_in) - listings),
+            "editorially_isolated": not (set(content_in) - listings) and u != home_url,
         }
     return graph, boilerplate, resolve
 
@@ -708,6 +734,7 @@ def render_note(entry, graph_entry, manifest, resolve, boilerplate):
         "canonical": m["canonical"] if m["canonical"] and m["canonical"] != entry["url"] else None,
         "redirected_from": entry.get("aliases") or None,
         "meta_robots": m["meta_robots"],
+        "in_sitemap": m.get("in_sitemap"),
         "lang": m["lang"],
         "og_image": m["og_image"],
         "schema_types": m["schema_types"],
@@ -767,6 +794,11 @@ def render_note(entry, graph_entry, manifest, resolve, boilerplate):
     fm["links_out_uncrawled"] = len(uncrawled) or None
     fm["links_out_external"] = len(external)
     fm["links_in_content"] = len(graph_entry["links_in_content"])
+    # Citations from pages that are not listings. links_in_content counts a news
+    # index that links to everything; this does not.
+    fm["links_in_content_non_listing"] = len(graph_entry.get("links_in_content_non_listing", []))
+    fm["editorially_isolated"] = graph_entry.get("editorially_isolated") or None
+    fm["listing_page"] = graph_entry.get("listing_page") or None
     fm["links_in_nav"] = len(graph_entry["links_in_nav"])
     fm["click_depth"] = graph_entry["click_depth"]
     fm["orphan"] = graph_entry["orphan"]
@@ -814,11 +846,21 @@ def render_note(entry, graph_entry, manifest, resolve, boilerplate):
         title = manifest[u]["meta"]["title"]
         return f"- {title} - {u}" if title else f"- {u}"
 
+    def capped(rows, total_count):
+        """Site furniture is identical on every page, so printing all of it once
+        per note buries the content. On a 126-page site the inbound nav list was
+        126 of a note's 237 lines, byte-identical across the vault, and it made
+        reading the notes expensive for no information: the count above says
+        everything the list says."""
+        if len(rows) <= NAV_LIST_CAP:
+            return rows or ["- none"]
+        return rows[:NAV_LIST_CAP] + [f"- ...and {total_count - NAV_LIST_CAP} more"]
+
     lines.append("## Links out")
     lines.append(f"### In content ({len(content_out)})")
     lines += [link_line(l, True) for l in content_out] or ["- none"]
     lines.append(f"\n### In nav and footer ({len(nav_out)})")
-    lines += [link_line(l, False) for l in nav_out] or ["- none"]
+    lines += capped([link_line(l, False) for l in nav_out], len(nav_out))
     lines.append(f"\n### Internal pages, no note in this vault ({len(uncrawled)})")
     lines += [link_line(l, False) for l in uncrawled] or ["- none"]
     lines.append(f"\n### Files (images, PDFs) ({len(assets)})")
@@ -830,7 +872,8 @@ def render_note(entry, graph_entry, manifest, resolve, boilerplate):
     lines.append(f"### In content ({len(graph_entry['links_in_content'])})")
     lines += [f"- {wikilink(manifest[u]['file'], manifest[u]['meta']['title'])}" for u in graph_entry["links_in_content"]] or ["- none"]
     lines.append(f"\n### In nav ({len(graph_entry['links_in_nav'])})")
-    lines += [plain_ref(u) for u in graph_entry["links_in_nav"]] or ["- none"]
+    lines += capped([plain_ref(u) for u in graph_entry["links_in_nav"]],
+                    len(graph_entry["links_in_nav"]))
 
     return "\n".join(lines) + "\n"
 
@@ -839,7 +882,7 @@ def render_note(entry, graph_entry, manifest, resolve, boilerplate):
 
 def write_report(path, manifest, graph, dead_links, redirects, gone, partial=False,
                  failed=(), gone_deleted=True, stale_links=(), mode="lean",
-                 sitemap_urls=()):
+                 sitemap_urls=(), inbound_uncrawled=None, uncrawled_status=None):
     L = ["# Crawl report",
          f"\n_{date.today().isoformat()} - {len(manifest)} pages - "
          # Whether the crawl stored full body text decides what any reader can
@@ -888,6 +931,7 @@ def write_report(path, manifest, graph, dead_links, redirects, gone, partial=Fal
             by_section[s] = by_section.get(s, 0) + 1
             t = e["meta"].get("content_type") or "page"
             by_type[t] = by_type.get(t, 0) + 1
+        isolated_n = sum(1 for g in graph.values() if g.get("editorially_isolated"))
         depths = [g["click_depth"] for g in graph.values() if g["click_depth"] is not None]
         L.append("\n## Site at a glance")
         L.append(f"- {len(manifest)} indexable pages, median {median} words"
@@ -897,6 +941,8 @@ def write_report(path, manifest, graph, dead_links, redirects, gone, partial=Fal
         shown, rest = top[:12], top[12:]
         L.append("- By section: " + ", ".join(f"{s} {n}" for s, n in shown)
                  + (f", and {len(rest)} smaller section(s)" if rest else ""))
+        L.append(f"- {isolated_n} of {len(manifest)} pages are cited by no page except a"
+                 " listing, which is the number to judge internal linking by")
         if depths:
             spread = {d: depths.count(d) for d in sorted(set(depths))}
             L.append("- Click depth: " + ", ".join(f"{d}={n}" for d, n in spread.items())
@@ -907,6 +953,13 @@ def write_report(path, manifest, graph, dead_links, redirects, gone, partial=Fal
                      " counts are a floor, not a total")
 
     section("Orphans (no inbound content links)", [link(u) for u, g in graph.items() if g["orphan"]])
+    # The number above undercounts editorial isolation wherever a site has a
+    # listing page. On one real site it read 26 while 82 further pages were cited
+    # by nothing except the news index, which is the site's actual problem.
+    isolated = [u for u, g in graph.items()
+                if g.get("editorially_isolated") and not g["orphan"]]
+    section("Cited only by a listing page (not orphans, but nothing links to them)",
+            [link(u) for u in isolated])
     section("Thin content (under %d words)" % THIN_WORDS,
             [f"{link(u)} - {e['meta']['word_count']}w" for u, e in manifest.items() if e["meta"]["word_count"] < THIN_WORDS])
     section("Missing meta description", [link(u) for u, e in manifest.items() if not e["meta"]["meta_description"]])
@@ -941,6 +994,13 @@ def write_report(path, manifest, graph, dead_links, redirects, gone, partial=Fal
     # every one is a link the site is choosing not to point straight at.
     section("Internal links pointing at a redirect",
             [f"{frm} → {to}" for frm, to in stale_links])
+    inbound_uncrawled = inbound_uncrawled or {}
+    uncrawled_status = uncrawled_status or {}
+    section("Linked-to pages with no note in this vault, by inbound links",
+            [f"{t} - {n} link(s)"
+             + (f", status {uncrawled_status[t]}" if t in uncrawled_status else "")
+             for t, n in sorted(inbound_uncrawled.items(), key=lambda kv: -kv[1])
+             if not is_asset(t)])
     section("Meta description contains script, not prose",
             [f"{link(u)} - {(e['meta']['meta_description'] or '')[:60]}..."
              for u, e in manifest.items()
@@ -1272,6 +1332,11 @@ def main():
             else segments[-1] if landing
             else segments[0] if len(segments) > 1
             else "(root)")
+        # Separates "live but not listed in the sitemap" from "failed to fetch",
+        # which look the same in a vault and are different problems.
+        if not link_crawl:
+            manifest[u]["meta"]["in_sitemap"] = (
+                u in discovered or slash_variant(u) in discovered)
         was = manifest[u].get("file")
         if was and was != rel:
             renamed.append(was)
@@ -1304,7 +1369,16 @@ def main():
             n = normalise_url(l["url"])
             if same_site(n, root_host) and not resolve(n) and n.startswith("http") and not is_archive(n):
                 candidates.add(n)
-    dead_links, stale_links = [], []
+    # How many pages link at each uncrawled target. Without this, working out that
+    # 257 links point at a page returning 403 meant cross-referencing three
+    # separate places by hand.
+    inbound_uncrawled = {}
+    for e in manifest.values():
+        for t in {normalise_url(l["url"]) for l in e["links"]}:
+            if t in candidates:
+                inbound_uncrawled[t] = inbound_uncrawled.get(t, 0) + 1
+
+    dead_links, stale_links, uncrawled_status = [], [], {}
     if candidates:
         print(f"  Checking {len(candidates)} internal link target(s) not in the crawl set"
               f" (about {human_time(len(candidates) * (delay + FETCH_ESTIMATE))})...", flush=True)
@@ -1319,6 +1393,7 @@ def main():
                 time.sleep(delay)
                 hr = session.get(target, timeout=30, allow_redirects=True, stream=True)
                 hr.close()
+            uncrawled_status[target] = hr.status_code
             if hr.status_code >= 400:
                 src = next((u for u, e in manifest.items() if any(normalise_url(l["url"]) == target for l in e["links"])), "?")
                 dead_links.append((src, target, hr.status_code))
@@ -1373,7 +1448,8 @@ def main():
     still_failing = [(u, why) for u, why in failed if u not in vanished]
     write_report(domain_dir / "REPORT.md", manifest, graph, dead_links, redirects,
                  gone, aborted, still_failing, gone_deleted=not args.keep_gone,
-                 stale_links=stale_links, mode=mode, sitemap_urls=sitemap_urls)
+                 stale_links=stale_links, mode=mode, sitemap_urls=sitemap_urls,
+                 inbound_uncrawled=inbound_uncrawled, uncrawled_status=uncrawled_status)
     checkpoint()
 
     orphans = sum(1 for g in graph.values() if g["orphan"])

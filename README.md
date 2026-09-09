@@ -179,6 +179,16 @@ Expect the orphan count to be high on a site whose pages are reachable mainly
 through the menu. That is the finding, not a fault in the crawl: `orphan: true`
 means no other page links to it from body copy.
 
+**Two isolation figures, and the second is usually the interesting one.** A page
+linked from a news index is not an orphan, but "the page that lists everything
+links to me" is not the same as "another page thought me worth citing". Any page
+whose own content links reach more than `LISTING_RATIO` (25%) of the site counts
+as a listing, and `editorially_isolated` marks pages nothing but a listing cites.
+On one real site the orphan count read 26 while a further 83 pages were cited by
+nothing except the news index, which was the site's actual problem. Listing links
+stay in the graph either way: a section hub pointing at its own posts is real
+structure.
+
 ## While it is running
 
 Every page prints as it is handled, so you can see a slow site apart from a
@@ -240,10 +250,12 @@ in `manifest.json` are ever touched, never anything else in the folder.
 
 ## What the report covers
 
-Orphans, thin content, missing or duplicate titles and meta descriptions, H1
-problems, pages more than three clicks deep, pages unreachable from the homepage,
-broken internal links, redirect chains, pages with no structured data, images
-missing alt text, likely JS-rendered pages, and external link targets by
+Orphans, pages cited only by a listing, thin content, missing or duplicate titles
+and meta descriptions, descriptions that are really inline script, H1 problems,
+pages more than three clicks deep, pages unreachable from the homepage, broken
+internal links, internal links pointing at a redirect, linked-to pages with no
+note ranked by inbound links, redirect chains, pages with no structured data,
+images missing alt text, likely JS-rendered pages, and external link targets by
 frequency.
 
 It opens with **Site at a glance**: page count, median and range of word counts,

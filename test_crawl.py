@@ -729,3 +729,100 @@ def test_report_lists_internal_links_that_redirect(tmp_path):
     crawl.write_report(out, manifest, graph, [], [], [], stale_links=[
         ("https://example.com/old/", "https://example.com/new/")])
     assert "Internal links pointing at a redirect (1)" in out.read_text("utf-8")
+
+
+def _stub(url, file, title, links, words=80):
+    """A manifest entry with every field render_note and write_report expect."""
+    html = f"<html><head><title>{title}</title></head><body><main><h1>{title}</h1>"            f"<p>{'word ' * words}</p></main></body></html>"
+    d = crawl.extract(html, url, "lean")
+    return {"url": url, "file": file, "hash": d["hash"], "mode": "lean",
+            "lastmod": None, "crawled": "2026-09-09", "status": 200,
+            "meta": d["meta"], "links": links, "outline": d["outline"],
+            "excerpt": d["excerpt"], "body_md": d["body_md"]}
+
+
+def _listing_corpus():
+    """A news index linking to every post, plus posts nothing else cites."""
+    posts = [f"https://example.com/post-{i}/" for i in range(12)]
+    manifest = {
+        "https://example.com/": _stub(
+            "https://example.com/", "home.md", "Home",
+            [{"url": "https://example.com/news/", "region": "content",
+              "anchor": "News", "nofollow": False}]),
+        "https://example.com/news/": _stub(
+            "https://example.com/news/", "news.md", "News",
+            [{"url": p, "region": "content", "anchor": f"Post {i}", "nofollow": False}
+             for i, p in enumerate(posts)]),
+    }
+    for i, p in enumerate(posts):
+        manifest[p] = _stub(p, f"post-{i}.md", f"Post {i}", [])
+    # one post is genuinely cited by another post
+    manifest[posts[0]]["links"] = [
+        {"url": posts[1], "region": "content", "anchor": "an earlier post",
+         "nofollow": False}]
+    return manifest, posts
+
+
+def test_listing_citations_do_not_count_as_editorial():
+    # 26 orphans were reported on a real site while 82 more pages were cited by
+    # nothing except the news index. That gap was the site's actual problem.
+    manifest, posts = _listing_corpus()
+    graph, _, _ = crawl.build_graph(manifest, "https://example.com/")
+
+    assert graph["https://example.com/news/"]["listing_page"] is True
+    # every post is "linked" by the index, so none is an orphan
+    assert all(not graph[p]["orphan"] for p in posts)
+    # but only the one cited by another post is not editorially isolated
+    assert graph[posts[1]]["editorially_isolated"] is False
+    assert graph[posts[1]]["links_in_content_non_listing"] == [posts[0]]
+    assert graph[posts[2]]["editorially_isolated"] is True
+    assert graph[posts[2]]["links_in_content_non_listing"] == []
+
+
+def test_listing_rule_is_off_on_a_tiny_site():
+    manifest = {}
+    pages = [f"https://example.com/p{i}" for i in range(4)]
+    for i, u in enumerate(pages):
+        manifest[u] = {"url": u, "file": f"p{i}.md", "meta": {"title": f"P{i}"},
+                       "links": [{"url": p, "region": "content", "anchor": "x"}
+                                 for p in pages if p != u]}
+    graph, _, _ = crawl.build_graph(manifest, pages[0])
+    assert all(not g["listing_page"] for g in graph.values())
+
+
+def test_report_reports_both_isolation_figures(tmp_path):
+    manifest, posts = _listing_corpus()
+    graph, _, _ = crawl.build_graph(manifest, "https://example.com/")
+    out = tmp_path / "REPORT.md"
+    crawl.write_report(out, manifest, graph, [], [], [])
+    text = out.read_text("utf-8")
+    assert "Cited only by a listing page" in text
+    assert "cited by no page except a listing" in text
+
+
+def test_nav_backlink_list_is_capped():
+    # 126 of a note's 237 lines were an inbound nav list identical on every page.
+    manifest = {}
+    pages = [f"https://example.com/p{i}" for i in range(30)]
+    for i, u in enumerate(pages):
+        manifest[u] = _stub(u, f"p{i}.md", f"P{i}",
+                            [{"url": pages[0], "region": "nav", "anchor": "Home",
+                              "nofollow": False}])
+    graph, boilerplate, resolve = crawl.build_graph(manifest, pages[0])
+    note = crawl.render_note(manifest[pages[0]], graph[pages[0]], manifest, resolve, boilerplate)
+    nav_block = note.split("### In nav (")[1]
+    assert nav_block.startswith("29)")            # true count still stated
+    assert "...and 19 more" in nav_block          # but only 10 rows printed
+    assert nav_block.count("\n- ") <= crawl.NAV_LIST_CAP + 1
+
+
+def test_uncrawled_targets_reported_with_inbound_counts(tmp_path):
+    manifest, graph, _, _ = _tiny_corpus()
+    out = tmp_path / "REPORT.md"
+    crawl.write_report(out, manifest, graph, [], [], [],
+                       inbound_uncrawled={"https://example.com/contact/": 257,
+                                          "https://example.com/logo.png": 40},
+                       uncrawled_status={"https://example.com/contact/": 403})
+    text = out.read_text("utf-8")
+    assert "https://example.com/contact/ - 257 link(s), status 403" in text
+    assert "logo.png" not in text                 # assets excluded from this list

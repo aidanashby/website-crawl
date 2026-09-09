@@ -27,12 +27,17 @@ pages alone.
 Use whatever context you already have: project instructions, reference documents,
 brand or strategy files, and anything I have told you in this conversation. If
 this is running inside a project set up for the organisation, that material is
-the authority, and it outranks what you infer from the crawl.
+the authority and outranks what you infer from the crawl.
 
-If you genuinely have none of that, do not stop and do not ask. Work out the
-likely priority order from the site itself, **state it in one line at the top of
-your report**, and flag that the recommendations rest on it. Say plainly if a
-different priority order would change your answer.
+**The common case is partial context**: strategy and messaging documents that
+say what the organisation cares about, but never state what the *website* is for
+or which audience it must serve first. Do not treat that as having the answer.
+Derive the priority order, **state it in one line at the top of the report**, and
+mark it as the assumption the recommendations rest on, so I can correct it. Say
+which findings would change if the order were different.
+
+If you have no context at all, do the same thing and say so. Either way, do not
+stop and do not ask.
 
 Read **What I would like** at the end before you start: it sets the shape of the
 report, and the shape matters as much as the findings. Lead with conclusions and
@@ -70,6 +75,20 @@ Two generated files sit alongside the notes:
   bulk questions across every page at once, and faster to read than opening
   hundreds of notes.
 
+  **Read this before you compute anything from it.** The manifest stores the
+  *raw* region tag for every link. The notes and `REPORT.md` then apply the
+  boilerplate and listing filters on top. So the same idea gives different
+  numbers depending on where you read it, and the raw numbers are the misleading
+  ones: counting `region: "content"` links straight from the manifest on one real
+  site put the donate page at 136 inbound links and three news posts at 93 each,
+  all of which were a sitewide call to action and a recent-posts widget.
+
+  Two more traps in the raw link list: WordPress category and author byline links
+  are tagged `content` but point at archive URLs that are excluded from the
+  crawl, so they will dominate any inbound tally you build yourself. **Trust the
+  notes and the report over anything you recompute**, and if you do recompute,
+  say so and say what you filtered.
+
 ## How to read a note
 
 Every note starts with YAML frontmatter. The fields you will care about:
@@ -80,16 +99,20 @@ Every note starts with YAML frontmatter. The fields you will care about:
 | `title`, `meta_description`, `h1` | As found in the HTML. `h1` is a list, because a page can wrongly have several. |
 | `word_count` | Words in the main content, with header, footer, nav and sidebar stripped out. |
 | `published`, `modified` | From structured data where the site provides it. |
-| `author`, `categories`, `tags`, `breadcrumb` | From structured data. Often absent. |
+| `author`, `categories`, `tags`, `breadcrumb` | From structured data. **Frequently missing entirely on WordPress sites**, and often uninformative when present (one staff author on everything). Check before building any argument on them; do not report their absence as a finding unless the site clearly intends to use them. |
 | `canonical` | Present only when it points somewhere other than this page, which is usually worth a look. |
 | `redirected_from` | Old URLs that redirect here. |
 | `meta_robots` | `noindex`, `nofollow` and so on. |
 | `lang`, `og_image`, `schema_types` | Language, social share image, structured data types found. |
 | `image_count`, `images_missing_alt` | Accessibility and image SEO. |
-| `links_out_content` | Links from the body text. This is the meaningful editorial number. |
+| `links_out_content` | Links from the body text, with the boilerplate filter already applied. This is the meaningful editorial number. |
 | `links_out_nav` | Links from nav, header, footer and sidebar. |
 | `links_out_external` | Links leaving the site. |
 | `links_in_content` | How many *other pages* link here from body text. Counted once per source page, so a listing page linking to a post three times as image, title and "read more" counts as one. |
+| `links_in_content_non_listing` | The same, but **excluding listing pages** — a news index, an archive, a section landing page. This is the number that answers "does the rest of the site know this page exists". A post linked only from `/news/` scores 0 here while `links_in_content` says 1. |
+| `editorially_isolated` | True when `links_in_content_non_listing` is 0: nothing cites this page except the listing that lists everything. Usually a much larger group than the orphans, and usually the more interesting one. |
+| `listing_page` | This page's own links reach a large share of the site, so it is an index rather than an editorial page. Its outbound links are real and stay in the graph, but they are not evidence that anyone chose to cite those pages. |
+| `in_sitemap` | Whether the site's sitemap lists this URL. A live page absent from the sitemap is a different problem from one that failed to fetch. |
 | `links_out_uncrawled` | Links to this site that have no note here. Present only when there are some. |
 | `links_nofollow` | Outbound links marked `rel="nofollow"`. |
 | `section` | Top-level URL folder, for grouping. `(root)` for a top-level page, `(home)` for the homepage. |
@@ -156,9 +179,9 @@ Please respect these limits and say so rather than guessing:
 - **`modified` is a hint, not proof.** Some themes set it to the publish date
   and never touch it again. Some SEO plugins bump every URL at once. Do not
   build an argument about content freshness on this field alone.
-- **No JavaScript was rendered.** A page with `word_count: 0` is almost
-  certainly a rendering artefact, not an empty page. Flag it as needing a manual
-  look rather than as thin content.
+- **No JavaScript was rendered**, so `word_count: 0` or `lazy_loaded: true` means
+  the numbers are a floor, not a total. Treat those pages as needing a manual
+  look rather than as thin or as having isolated link targets.
 - **A link appearing in the content of over half the pages is treated as
   boilerplate** and excluded from the content link counts, as are menus,
   footers, sidebars, breadcrumbs, cookie banners and share bars. This is why a
@@ -166,9 +189,7 @@ Please respect these limits and say so rather than guessing:
   the site. A high orphan count usually means the site does little editorial
   cross-linking, not that pages are unreachable.
 - **Listing pages are followed through their pagination**, so a news landing
-  page's links include posts beyond its first screen. A page flagged
-  `lazy_loaded` is the exception: its content arrives by JavaScript and cannot be
-  read, so its links are incomplete.
+  page's links include posts beyond its first screen.
 - **Archive URLs are excluded by default**: pagination, category, tag, author
   and date archives, and feeds. Their absence is not a finding.
 - **There is no traffic, ranking, conversion, backlink or search-console data
@@ -184,20 +205,22 @@ these fits the tool you are running in:
 Take the **first** of these that you can actually do. More than one may apply;
 the earlier one wins.
 
-1. **You can write files directly** (Claude Code, an IDE agent, a local tool):
-   write it to disk in the folder above and tell me the path. This beats an
-   artifact or a canvas even when you could do those too.
-2. **Claude (app or web)**: create it as a single Markdown **Artifact**. If you
-   revise it, update that same artifact rather than making a second one.
-3. **ChatGPT**: put it in a **Canvas**, and also write it to a **downloadable
-   `.md` file** and give me the download link. I want the file, not just the
-   canvas.
-4. **Anything else**: output the whole thing as one fenced Markdown code block I
-   can copy in a single go.
+1. **Can write files** (Claude Code, an IDE agent, a local tool): write it to
+   disk in the folder above and tell me the path. This wins even where you could
+   also make an artifact or a canvas.
+2. **Claude**: one Markdown Artifact, updated in place on revision.
+3. **ChatGPT**: a Canvas *and* a downloadable `.md` file. I want the file.
+4. **Anything else**: one fenced Markdown code block I can copy in a single go.
 
 Name it `SEO-REVIEW-<domain>-<crawl date>.md`, taking the crawl date from the
 line at the top of `REPORT.md`, not today's date. For example
 `SEO-REVIEW-example.com-2026-09-09.md`.
+
+**If a file of that name already exists, do not overwrite it.** The naming rule
+makes a collision certain on any re-run of the same crawl, and the earlier file
+may be work I want to keep or compare against. Write
+`SEO-REVIEW-<domain>-<crawl date>-2.md` instead, incrementing as needed, and tell
+me which name you used and that an earlier report is still there.
 
 Three rules for the file itself:
 
@@ -220,13 +243,21 @@ the shape below exactly.
 
 ### How to structure the report
 
+**Rank by consequence, not by count.** This is the rule that most changes what a
+useful report looks like, so it comes first. Forty pages missing a meta
+description is one finding, not forty. A single wrong title on the main service
+page can outrank a hundred cosmetic issues. Give the size of each problem in the
+site's own terms: how many pages, and what share of the site.
+
 Write it so I can act on the first page and read the rest later. Most of the
 value is in the top 300 words. Work from conclusions down to evidence, never the
 other way round: no build-up, no narrating your process, no summarising what you
 are about to say.
 
 **1. Verdict.** Five sentences at most. What kind of shape is this site in, what
-is the single biggest problem, and what is the one thing I should do first.
+is the single biggest problem, and what I should do first. "First" can point
+forward to a numbered item in **Bigger decisions** rather than to a quick win,
+and should when that is where the value is. Say which number.
 
 **2. The shape of the problem.** One paragraph, and only if it earns its place.
 Sites often have one underlying problem showing up in a dozen ways. If that is
@@ -234,10 +265,16 @@ true here, name the cause plainly, and say which of the findings below are
 symptoms of it. If the problems really are unrelated, write "no single cause"
 and move on. Do not manufacture a theme that is not there.
 
-**3. Fix this week.** At most five items, as a table: what to do, where, why it
+**3. Do first.** At most five items, as a table: what to do, where, why it
 matters, and roughly how long. "Roughly how long" means my own time editing in
-WordPress, not a developer's. Only things genuinely quick, safe and clearly worth
-doing; if something is quick but you are unsure it helps, put it lower down.
+WordPress, not a developer's. For anything that is a diagnosis rather than a
+change, write "unknown — diagnose first" instead of inventing a number.
+
+Mostly this is quick, safe, clearly worthwhile work. **One row may be urgent
+rather than quick** — something with an unbounded tail that still has to be
+looked at before anything else. Mark it `urgent, not quick` and put it first.
+Burying a live problem below five fifteen-minute jobs to protect the shape of a
+table would be the wrong call.
 
 **4. Bigger decisions.** Work that needs planning, a judgement call, or someone
 else's agreement. One line each on what the choice actually is. Aim for five,
@@ -256,9 +293,15 @@ two. Then:
 section, with evidence cited by note path so I can check it. Order the themes by
 how much they matter, not by how much you have to say about them. For each
 finding, be clear whether you are confident or inferring, and **end it with what
-to do**: the change, the pages affected, the rough effort, and what improvement
-you expect. The plan lives here, attached to its evidence, rather than in a
-separate section that repeats it.
+to do**, in five parts: the change, the pages affected, the rough effort, what
+improvement you expect, **or that you cannot tell what improvement to expect and
+why not**. That last part carries equal weight with the others. Most of the time
+you will not have the traffic or ranking data to predict a payoff, and saying so
+is the correct answer, not a gap in the report. Do not assert a benefit to fill
+the shape.
+
+The plan lives here, attached to its evidence, rather than in a separate section
+that repeats it.
 
 **7. What I could not tell from this data.** What you would need in order to
 answer the questions the crawl cannot: traffic, rankings, conversions, backlinks,
@@ -266,11 +309,6 @@ search-console data, or knowledge of the organisation's priorities.
 
 ### Rules for the whole report
 
-- **Rank by consequence, not by count.** Forty pages missing a meta description
-  is one finding, not forty. A single wrong page title on the main service page
-  can matter more than a hundred cosmetic issues, and should sit above them.
-  Give the size of each problem in the site's own terms: how many pages, and what
-  share of the site.
 - **No generic SEO advice.** Everything must point at something in this vault. If
   a recommendation would apply unchanged to any website, cut it. Assume I know
   the site and understand SEO basics.

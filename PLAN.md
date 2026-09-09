@@ -278,6 +278,10 @@ presence, so flagging their thin content or missing description is noise.
   breakdown by content type and section, the click-depth spread. Orientation
   before faults.
 - **Orphans**: no inbound content links
+- **Cited only by a listing page**: not orphans, but no ordinary page links to
+  them. Usually the larger and more useful figure of the two.
+- **Linked-to pages with no note in this vault**, ranked by inbound links and
+  carrying their HTTP status
 - **Thin content**: under 300 words in the content root
 - **Meta description**: missing, outside 70-160 characters, or duplicated
 - **Titles**: missing, duplicated, or over 60 characters
