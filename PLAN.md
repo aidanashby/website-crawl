@@ -24,7 +24,7 @@ Maps a site into an Obsidian vault: one note per page, folders mirroring the URL
 ```
 website-crawl/
 ├── crawl.py
-├── Crawl Website.cmd       prompts for URL, then N (new) / F (full)
+├── Crawl Website.cmd       checks venv and packages (offers setup), prompts for URL, then N / F
 ├── requirements.txt
 ├── .gitignore              venv/, __pycache__/, crawled/
 ├── venv/

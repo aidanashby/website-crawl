@@ -2,6 +2,12 @@
 
 Notable changes to website-crawl. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `Crawl Website.cmd` checks for the `venv` and its packages before asking for a URL. If anything is missing it offers to create the environment, or to install Python 3.12 with winget when no Python 3.11+ is found. Nothing is installed without a Y.
+
 ## [1.0.0] - 2026-09-09
 
 First public release. Everything below describes what the tool does, since there is no earlier version to compare against.

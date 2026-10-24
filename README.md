@@ -8,7 +8,7 @@ The `Crawl Website.cmd` launcher is Windows-only. `crawl.py` itself runs anywher
 
 ## Running it
 
-Double-click **`Crawl Website.cmd`**, enter a URL, and choose:
+Double-click **`Crawl Website.cmd`**. It first checks that the `venv` and its packages are present (under a second) and, if not, offers to install Python 3.12 (via winget) and set up the environment for you. Then enter a URL and choose:
 
 - **N — New and changed pages** (default). Fetches pages new since the last run, plus any the sitemap flags as modified.
 - **F — Full re-fetch**. Re-fetches everything and rewrites only the notes whose rendered output actually changed, so the file timestamps show what moved.
@@ -41,6 +41,8 @@ venv\Scripts\python crawl.py https://example.com --skip-pagination
 | `--skip-pagination` | Do not follow `/page/2/` links to harvest a listing page's remaining links. |
 
 ## Setup
+
+`Crawl Website.cmd` does this for you on first run (it asks before installing anything). The `venv` is not in git, so each machine needs its own. To do it by hand:
 
 ```
 python -m venv venv
