@@ -1,0 +1,16 @@
+{
+  "dependencies": [
+    {
+      "name": "Python",
+      "check": { "run": "python --version" },
+      "install": "winget install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements"
+    },
+    {
+      "name": "Python venv",
+      "purpose": "requests, Beautiful Soup, lxml and markdownify in venv/",
+      "perRepo": true,
+      "check": { "run": "venv\\Scripts\\python -c \"import requests, bs4, lxml, markdownify, defusedxml\"" },
+      "install": "python -m venv venv && venv\\Scripts\\python -m pip install -r requirements.txt"
+    }
+  ]
+}
