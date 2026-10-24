@@ -49,7 +49,7 @@ python -m venv venv
 venv\Scripts\python -m pip install -r requirements.txt
 ```
 
-Python 3.11+. Dependencies: `requests`, `beautifulsoup4`, `lxml`, `markdownify`, `defusedxml`, plus `pytest` for the tests.
+Python 3.9+. Dependencies: `requests`, `beautifulsoup4`, `lxml`, `markdownify`, `defusedxml`, plus `pytest` for the tests.
 
 ## Tests
 

@@ -16,8 +16,8 @@ goto :url
 echo.
 echo   The crawler's Python environment is missing or incomplete.
 set "PY="
-py -3 -c "import sys; sys.exit(sys.version_info < (3, 11))" >nul 2>&1 && set "PY=py -3"
-if not defined PY python -c "import sys; sys.exit(sys.version_info < (3, 11))" >nul 2>&1 && set "PY=python"
+py -3 -c "import sys; sys.exit(sys.version_info < (3, 9))" >nul 2>&1 && set "PY=py -3"
+if not defined PY python -c "import sys; sys.exit(sys.version_info < (3, 9))" >nul 2>&1 && set "PY=python"
 if not defined PY goto :nopython
 
 echo.
@@ -29,7 +29,7 @@ venv\Scripts\python.exe -m pip install -r requirements.txt || goto :fail
 goto :url
 
 :nopython
-echo   Python 3.11 or newer is not installed.
+echo   Python 3.9 or newer is not installed.
 echo.
 choice /c YN /n /m "  Install Python 3.12 with winget now? [Y/N]: "
 if errorlevel 2 exit /b 1
