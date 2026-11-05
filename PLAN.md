@@ -10,7 +10,7 @@ Maps a site into an Obsidian vault: one note per page, folders mirroring the URL
 | No sitemap | Breadth-first link crawl from the homepage, capped by `--max-pages` (default 500). |
 | Stack | `requests`, `beautifulsoup4`, `lxml`, `markdownify` (for `--full-text`) in a venv. |
 | Body content | Meta description + heading outline + link lists. `--full-text` stores the full main content as Markdown. |
-| Page chrome | `footer`, `nav`, `aside`, plus anything matching the furniture class patterns (menus, breadcrumbs, pagination controls, widget areas, cookie banners, share bars), excluded from content, word count and outline. `header` is **kept**: themes put the page H1 and hero copy inside it. Links are still extracted from the **whole** document, tagged by region. |
+| Page chrome | `footer`, `nav`, `aside`, plus anything matching the furniture class patterns (menus, breadcrumbs, pagination controls, widget areas, cookie banners, share bars), excluded from content, word count and outline. A masthead `header` (outside `main` and `article`, holding no `h1`) is excluded as well; one inside content, or holding the `h1`, is **kept**, because themes put the page H1 and hero copy there. Links are still extracted from the **whole** document, tagged by region. |
 | Layout | One folder per domain, subfolders mirroring the URL path. |
 | Change detection | `manifest.json` keyed on final URL. Default run fetches new plus `lastmod`-changed; `--full` re-fetches everything. |
 | Link graph | Persisted in the manifest, so the second pass works on incremental runs. |
@@ -87,7 +87,7 @@ Expand sitemap-index files recursively. Collect each URL with its `lastmod` wher
 - GET, following redirects. **Key everything on the final URL** and record the requested URL as an alias, so `/old/` and `/new/` do not both produce a note.
 - Reject anything that is not `text/html`.
 - Parse with BeautifulSoup and `lxml`.
-- **Content root**: `<body>` with `footer`, `nav`, `aside` and furniture removed, then the *largest* `<main>` or `<article>` if it holds at least half the page's text. Not the first one: a page builder wraps every teaser card in its own `<article>`, and taking the first undercounted a real post twentyfold. Drives word count, outline, excerpt, full text and the content hash.
+- **Content root**: `<body>` with `footer`, `nav`, `aside`, masthead `header` and furniture removed, then the *largest* `<main>` or `<article>` if it holds at least half the page's text. Not the first one: a page builder wraps every teaser card in its own `<article>`, and taking the first undercounted a real post twentyfold. Drives word count, outline, excerpt, full text and the content hash.
 - **Links**: extracted from the *whole* document, each tagged `content`, `nav`, `footer` or `sidebar` by its nearest landmark or furniture ancestor.
 - Hash the normalised content root, not the whole page, so a nav edit does not mark all 400 pages as changed.
 
@@ -240,7 +240,7 @@ python crawl.py https://example.com --skip-pagination  do not follow /page/2/
 python crawl.py https://example.com --keep-gone         keep notes for deleted pages
 ```
 
-`--full-text` is recorded per file in the manifest, and a mode change counts as a change. Otherwise re-running with the flag would hit an unchanged hash and leave the vault mixing both formats.
+`--full-text` is recorded per file in the manifest, and a mode change counts as a change. Otherwise re-running with the flag would hit an unchanged hash and leave the vault mixing both formats. The same applies to a change in extraction rules: each page records `extract_version`, and an older one is re-fetched.
 
 `--ignore-robots` exists because staging and dev WordPress installs almost always carry `Disallow: /`, and those are exactly the sites worth mapping. It still honours the crawl delay.
 
@@ -271,7 +271,7 @@ python crawl.py https://example.com --keep-gone         keep notes for deleted p
 
 The plan above survived contact with two live sites; these did not, and each was found by looking at output rather than by reasoning about it:
 
-- **`<header>` was excluded from content.** Themes put the page H1 and hero copy inside it, so word counts and H1 detection were wrong. Menus are now excluded by class instead, which is also what catches a page-builder menu sitting in the middle of the content.
+- **`<header>` was excluded from content.** Themes put the page H1 and hero copy inside it, so word counts and H1 detection were wrong. Menus are now excluded by class instead, which is also what catches a page-builder menu sitting in the middle of the content. A later change (Nov 2026) drops a masthead `<header>` that is outside `<main>`/`<article>` and holds no `<h1>`, so site-wide header text stays out of saved content, while the hero case above still keeps its header.
 - **The content root took the first `<article>`.** Divi wraps every teaser card in one, so a real post measured 48 words against a true 978. Median word count across the site was wrong by a factor of twenty, and the thin-content list was almost entirely false.
 - **Boilerplate counted links from every region.** On a five-page site every page is in the menu, so every internal target hit 100% and genuine body links were suppressed.
 - **Listing pages only serve their first screen.** Without following pagination, every post past the tenth looked orphaned.

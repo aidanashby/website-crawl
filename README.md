@@ -39,7 +39,7 @@ venv\Scripts\python crawl.py https://example.com --skip-pagination
 | Flag | Effect |
 |---|---|
 | `--full` | Re-fetch every page, not just new/changed ones. |
-| `--full-text` | Store the full page body as Markdown, not just the excerpt. Recorded per file; switching modes re-renders the note. |
+| `--full-text` | Store the full page body as Markdown, not just the excerpt. Recorded per file; switching modes re-fetches every page and re-renders the notes. |
 | `--max-pages N` | Cap for the link-crawl fallback (default 500). Ignored when a sitemap is found. |
 | `--delay S` | Seconds between requests. Defaults to the site's `Crawl-delay`, else 1.0. |
 | `--ignore-robots` | Bypass `robots.txt` `Disallow` rules. Staging and dev installs usually carry `Disallow: /`. Still honours the crawl delay. |
@@ -70,7 +70,7 @@ No network: they run against HTML fixtures. They cover the parts that have actua
 
 1. Reads `robots.txt` for `Sitemap:` directives and `Crawl-delay`, else tries `/sitemap.xml`. Sitemap-index files are expanded recursively. No usable sitemap means a breadth-first link crawl from the homepage, capped by `--max-pages`.
 2. Fetches each page, following redirects. Everything is keyed on the **final** URL; the original is recorded as an alias so a redirect never produces two notes.
-3. Parses with BeautifulSoup. `<footer>`, `<nav>`, `<aside>` and anything matching the furniture patterns are removed before measuring word count, the heading outline and the content hash. `<header>` is kept, since it often holds the page H1. Links are extracted from the **whole** page and tagged by region (`content`, `nav`, `footer`, `sidebar`), because the nav *is* the site's link structure.
+3. Parses with BeautifulSoup. `<footer>`, `<nav>`, `<aside>` and anything matching the furniture patterns are removed before measuring word count, the heading outline and the content hash. A masthead `<header>` is removed too, unless it holds the page H1 (see **Page content**). Links are extracted from the **whole** page and tagged by region (`content`, `nav`, `footer`, `sidebar`), because the nav *is* the site's link structure.
 4. Follows `/page/2/` and beyond on listing pages, folding their links into the listing page. No notes are written for paginated URLs.
 5. A second pass over the whole corpus (read from `manifest.json`, so it works on incremental runs) computes backlinks, click depth from the homepage, and the orphan flag. See **What the graph shows** for how a content link is told apart from site furniture.
 6. Internal link targets not in the crawl set get a `HEAD` request, confirmed with a `GET` before being called broken, so broken internal links surface in the report without false positives from servers that refuse `HEAD`.
@@ -117,7 +117,7 @@ Only editorial links inside a page's content become wikilinks. Menu, footer and 
 
 Four independent rules do this, and a link only needs to trip one:
 
-- **Position.** Anything inside `<nav>`, `<footer>` or `<aside>` is tagged by region and excluded. `<header>` is deliberately **not** excluded: themes put the page H1, and sometimes a hero block, inside it, so dropping the whole element lost real content and produced false word counts and missing H1s.
+- **Position.** Anything inside `<nav>`, `<footer>` or `<aside>` is tagged by region and excluded. `<header>` is excluded from the saved text only when it is a masthead (outside `<main>` and `<article>`, no `<h1>`). Themes put the page H1, and sometimes a hero block, inside a header, so dropping every header lost real content and produced false word counts and missing H1s. Its links are still tagged as links, never discarded.
 - **Furniture class or id.** Menus, breadcrumbs, pagination controls, sidebars and widget areas, cookie banners, share bars, skip links and search forms are matched by class or id and excluded wherever they sit. A page builder renders all of these as plain `<div>`s, so the element name tells you nothing: Divi's menu is `<div class="et_pb_menu">` and can appear mid-content. This is belt and braces with the rule above, and it is what keeps a header's menu out while keeping the header's heading in.
 - **Frequency.** Any link appearing *in page content* on more than `BOILERPLATE_RATIO` (50%) of pages is treated as boilerplate, wherever it sits in the markup. Only content-region appearances are counted, because nav links are already handled by the rule above. Counting every region breaks small sites: on a five-page site every page is in the main menu, so every internal target reaches 100% and even a genuine body link gets suppressed.
 - **Sitemap pages.** Any URL with `sitemap` in the path is an index page, so all of its outbound links are treated as navigation. An HTML sitemap links to everything, and without this it becomes a single node wired to every other note.
