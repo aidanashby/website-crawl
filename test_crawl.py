@@ -826,3 +826,253 @@ def test_uncrawled_targets_reported_with_inbound_counts(tmp_path):
     text = out.read_text("utf-8")
     assert "https://example.com/contact/ - 257 link(s), status 403" in text
     assert "logo.png" not in text                 # assets excluded from this list
+
+
+# ------------------------------------------------- saved content excludes page chrome
+
+MASTHEAD_PAGE = """<html><head><title>Rooms</title></head><body>
+  <header><div class="strapline">Acme masthead tagline</div><a href="/shop/">Shop</a></header>
+  <nav><a href="/about/">About nav</a></nav>
+  <div class="entry"><h1>Rooms for hire</h1><p>Twelve accessible rooms.</p></div>
+  <footer>Acme footer small print <a href="/privacy/">Privacy</a></footer>
+</body></html>"""
+
+
+def test_masthead_header_is_left_out_of_saved_content_but_its_links_are_reported():
+    d = crawl.extract(MASTHEAD_PAGE, "https://example.com/rooms/", "full")
+    assert "masthead" not in d["body_md"] and "footer" not in d["body_md"]
+    assert "About nav" not in d["body_md"]
+    assert "Twelve accessible rooms." in d["body_md"]
+    regions = {l["url"]: l["region"] for l in d["links"]}
+    assert set(regions) >= {"https://example.com/shop/", "https://example.com/about/",
+                            "https://example.com/privacy/"}
+    assert regions["https://example.com/about/"] == "nav"
+    assert regions["https://example.com/privacy/"] == "footer"
+
+
+def test_masthead_header_does_not_inflate_the_word_count():
+    with_header = crawl.extract(MASTHEAD_PAGE, "https://example.com/rooms/", "lean")
+    without = crawl.extract(MASTHEAD_PAGE.replace("Acme masthead tagline", ""),
+                            "https://example.com/rooms/", "lean")
+    assert with_header["meta"]["word_count"] == without["meta"]["word_count"]
+
+
+def test_header_inside_an_article_is_kept():
+    # The article is too small to be the content root, so the whole body is
+    # searched and the masthead rule is what has to tell the two headers apart.
+    html = f"""<html><body><header>Site masthead words</header>
+      <div class="entry"><h1>Rooms</h1><p>{'Long body text. ' * 30}</p></div>
+      <article><header><p>Published by the rooms team</p></header>
+      <p>Teaser.</p></article></body></html>"""
+    d = crawl.extract(html, "https://example.com/rooms/", "full")
+    assert "Published by the rooms team" in d["body_md"]
+    assert "Site masthead words" not in d["body_md"]
+
+
+def test_h1_found_outside_the_content_still_counts():
+    # An H1 in an <aside> is stripped from the saved text, but a page whose only
+    # H1 sits there must not be reported as having none.
+    html = """<html><body><aside><h1>Only heading</h1></aside>
+      <main><p>Body text here.</p></main></body></html>"""
+    d = crawl.extract(html, "https://example.com/x/", "full")
+    assert d["meta"]["h1"] == ["Only heading"]
+    assert "Only heading" not in d["body_md"]
+
+
+def test_body_does_not_repeat_the_h1_the_note_already_prints():
+    d = crawl.extract(MASTHEAD_PAGE, "https://example.com/rooms/", "full")
+    assert not d["body_md"].startswith("# ")
+    other = crawl.extract(
+        "<html><body><main><h1>Real title</h1><p>x</p></main></body></html>",
+        "https://example.com/y/", "full")
+    assert other["body_md"] == "x"
+    # A different first heading is content, not a repeat.
+    kept = crawl.extract(
+        "<html><body><header><h1>Site name</h1></header>"
+        "<main><h2>Section</h2><p>x</p></main></body></html>",
+        "https://example.com/z/", "full")
+    assert kept["meta"]["h1"] == ["Site name"]
+    assert "Section" in kept["body_md"]
+
+
+# ----------------------------------------------- whole runs against a local server
+# main() end to end: real HTTP on 127.0.0.1, no outside network.
+
+import json
+import sys
+import threading
+from collections import Counter
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import pytest
+
+SITE_PAGE = """<html><head><title>{t}</title><meta name="description" content="{t} summary."></head>
+<body><header><div class="strapline">Masthead {t}</div></header>
+<nav><a href="/about/">About nav</a></nav>
+<div class="entry"><h1>{t}</h1><p>Body of {t} {extra}</p><a href="/about/">about us</a></div>
+<footer>Footer {t} <a href="/">Footer home</a></footer></body></html>"""
+
+
+class _Site:
+    def __init__(self):
+        self.pages = {"/": ("Home", ""), "/about/": ("About", "")}
+        self.lastmod = {"/": "2026-01-01", "/about/": "2026-01-01"}
+        self.hits = Counter()
+        site = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _send(self, head_only):
+                path = self.path
+                if path == "/sitemap.xml":
+                    items = "".join(
+                        f"<url><loc>{site.url}{p}</loc><lastmod>{site.lastmod[p]}</lastmod></url>"
+                        for p in site.pages)
+                    body, ctype, code = (
+                        f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{items}</urlset>',
+                        "application/xml", 200)
+                elif path in site.pages:
+                    if not head_only:
+                        site.hits[path] += 1
+                    t, extra = site.pages[path]
+                    body, ctype, code = SITE_PAGE.format(t=t, extra=extra), "text/html", 200
+                else:
+                    body, ctype, code = "not found", "text/plain", 404
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body.encode())))
+                self.end_headers()
+                if not head_only:
+                    self.wfile.write(body.encode())
+
+            def do_GET(self):
+                self._send(False)
+
+            def do_HEAD(self):
+                self._send(True)
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.fixture
+def site():
+    s = _Site()
+    yield s
+    s.close()
+
+
+@pytest.fixture
+def crawl_run(site, tmp_path, monkeypatch):
+    """Call main() as the launcher would; returns the vault folder."""
+    monkeypatch.setattr(crawl, "HERE", tmp_path)
+
+    def run(*flags):
+        monkeypatch.setattr(sys, "argv", ["crawl.py", site.url + "/", "--delay", "0",
+                                          "--ignore-robots", *flags])
+        crawl.main()
+        return tmp_path / "crawled" / "127.0.0.1"
+    return run
+
+
+def _manifest(vault):
+    return json.loads((vault / "manifest.json").read_text("utf-8"))
+
+
+@pytest.mark.parametrize("flags,has_body", [
+    ([], False),                              # new/changed + excerpts
+    (["--full"], False),                      # full re-fetch + excerpts
+    (["--full-text"], True),                  # new/changed + page content
+    (["--full", "--full-text"], True),        # full re-fetch + page content
+])
+def test_each_wizard_combination_writes_one_note_per_page(site, crawl_run, flags, has_body):
+    vault = crawl_run(*flags)
+    note = (vault / "home.md").read_text("utf-8")
+    assert (vault / "about.md").exists()
+    # The description is always in the frontmatter. Excerpts-only notes repeat it
+    # as their body; page-content notes show the page text instead.
+    assert ("Body of Home" in note) is has_body
+    assert note.count("Home summary.") == (1 if has_body else 2)
+    # Chrome never reaches the saved text, in either mode.
+    assert "Masthead Home" not in note and "Footer Home" not in note
+    # The H1 is printed once, by the note.
+    assert note.splitlines().count("# Home") == 1
+    # No stray extra files: everything for a page is its note.
+    assert sorted(p.name for p in vault.rglob("*") if p.is_file()) == [
+        "REPORT.md", "about.md", "home.md", "manifest.json"]
+
+
+def test_links_in_nav_and_footer_are_still_reported(site, crawl_run):
+    vault = crawl_run("--full-text")
+    links = _manifest(vault)[site.url + "/"]["links"]
+    regions = {(l["url"], l["region"]) for l in links}
+    assert (site.url + "/about/", "nav") in regions
+    assert (site.url + "/about/", "content") in regions
+    assert (site.url + "/", "footer") in regions
+
+
+def test_second_run_skips_unchanged_pages(site, crawl_run, capsys):
+    crawl_run("--full-text")
+    assert site.hits == {"/": 1, "/about/": 1}
+    crawl_run("--full-text")
+    assert site.hits == {"/": 1, "/about/": 1}
+    assert "unchanged  2" in capsys.readouterr().out
+
+
+def test_changing_the_content_choice_refetches_every_page(site, crawl_run):
+    crawl_run("--full-text")
+    crawl_run()                                # to excerpts, on the incremental option
+    assert site.hits == {"/": 2, "/about/": 2}
+    vault = crawl_run("--full-text")           # and back
+    assert site.hits == {"/": 3, "/about/": 3}
+    assert "Body of Home" in (vault / "home.md").read_text("utf-8")
+
+
+def test_excerpt_run_drops_stored_body_text(site, crawl_run):
+    vault = crawl_run("--full-text")
+    assert _manifest(vault)[site.url + "/"]["body_md"]
+    vault = crawl_run()
+    assert _manifest(vault)[site.url + "/"]["body_md"] == ""
+    assert "Body of Home" not in (vault / "home.md").read_text("utf-8")
+
+
+def test_full_refetch_reads_every_page_again(site, crawl_run):
+    crawl_run("--full-text")
+    crawl_run("--full-text", "--full")
+    assert site.hits == {"/": 2, "/about/": 2}
+
+
+def test_incremental_run_picks_up_a_page_the_sitemap_marks_modified(site, crawl_run):
+    vault = crawl_run("--full-text")
+    site.pages["/about/"] = ("About", "now with new words")
+    site.lastmod["/about/"] = "2026-02-01"
+    crawl_run("--full-text")
+    assert site.hits == {"/": 1, "/about/": 2}
+    assert "now with new words" in (vault / "about.md").read_text("utf-8")
+
+
+def test_vault_written_under_older_extraction_rules_is_refetched(site, crawl_run):
+    vault = crawl_run("--full-text")
+    m = _manifest(vault)
+    for e in m.values():
+        e["extract_version"] = crawl.EXTRACT_VERSION - 1
+    (vault / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
+    vault = crawl_run("--full-text")
+    assert site.hits == {"/": 2, "/about/": 2}
+    assert all(e["extract_version"] == crawl.EXTRACT_VERSION for e in _manifest(vault).values())
+
+
+def test_page_removed_from_the_site_loses_its_note(site, crawl_run):
+    vault = crawl_run("--full-text")
+    assert (vault / "about.md").exists()
+    del site.pages["/about/"]
+    vault = crawl_run("--full-text")
+    assert not (vault / "about.md").exists()
+    assert (vault / "home.md").exists()

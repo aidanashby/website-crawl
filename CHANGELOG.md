@@ -6,6 +6,10 @@ Notable changes to website-crawl. Format follows [Keep a Changelog](https://keep
 
 ### Changed
 
+- `Crawl Website.cmd` asks two questions: which pages (new and changed, or full re-fetch) and what to save (page content, or excerpts only), giving four combinations. Page content is the default. Before, the launcher's "F" passed `--full` only, which re-fetches but does not store page text, so the launcher could not save page bodies at all.
+- The saved page text no longer includes a site masthead `<header>` (one outside `<main>` and `<article>` that holds no `<h1>`). Headers inside content, and headers holding the page H1, are kept. Links in the header, nav and footer are still reported as before.
+- The saved text no longer repeats the page H1 that the note already prints.
+- `manifest.json` records an `extract_version` per page. Pages saved under older extraction rules are re-fetched on the next run, so one vault never mixes rules. Word counts and thin-content results may shift after the first run.
 - `Crawl Website.cmd` checks for the `venv` and its packages before asking for a URL. If anything is missing it offers to create the environment, or to install Python 3.12 with winget when no Python 3.9+ is found. Nothing is installed without a Y.
 
 ## [1.0.0] - 2026-09-09

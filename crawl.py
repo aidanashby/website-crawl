@@ -38,6 +38,10 @@ __version__ = "1.0.0"        # single source of truth; the user agent derives fr
 # Identifies the crawler to site owners reading their logs, and points them at
 # something they can look up. Convention for a published crawler.
 USER_AGENT = f"website-crawl/{__version__} (+https://github.com/aidanashby/website-crawl)"
+# Bump when extract() would produce different text for the same HTML. Pages
+# stored under an older version are re-fetched on the next run even when the
+# sitemap says they are unchanged, so a vault never mixes old and new rules.
+EXTRACT_VERSION = 2
 DEFAULT_DELAY = 1.0
 DEFAULT_MAX_PAGES = 500
 FETCH_ESTIMATE = 0.4      # typical seconds per request, for the up-front estimate only
@@ -400,9 +404,15 @@ def content_root(soup):
     for junk in soup.find_all(["script", "style", "noscript", "template", "svg"]):
         junk.decompose()
     body = soup.body or soup
-    # <header> is kept: it often carries the page H1 and a hero block. The menu
-    # inside it is removed by class, so its link text does not count as content.
-    for chrome in body.find_all(["footer", "nav", "aside"]):
+    # A <header> outside <main> and <article> is normally the site masthead (logo,
+    # menu, search) and is dropped. Two kinds stay: one inside <main> or <article>
+    # is that content's own title block, and one holding an <h1> is the page's
+    # hero (themes put the H1 and an intro there, and dropping it lost real text).
+    # The menu inside a kept header is removed by class below.
+    for chrome in body.find_all(["header", "footer", "nav", "aside"]):
+        if chrome.name == "header" and (chrome.find_parent(["main", "article"])
+                                        or chrome.find("h1")):
+            continue
         chrome.decompose()
     for furniture in body.find_all(is_menu):
         furniture.decompose()
@@ -473,6 +483,9 @@ def extract(html, final_url, mode):
     graph = json_ld_graph(soup)
     schema_types = sorted({t for node in graph for t in _types(node)})
 
+    # content_root() removes the masthead, nav and footer from the tree, so anything
+    # wanted from the whole page has to be read first.
+    page_h1s = [clean_text(h.get_text()) for h in soup.find_all("h1")]
     root = content_root(soup)
     text = root.get_text(" ", strip=True)
     word_count = len(text.split())
@@ -500,8 +513,7 @@ def extract(html, final_url, mode):
     # Prefer H1s inside the content root: a themed site puts its logo or site name
     # in a header H1, which would otherwise show as a spurious "multiple H1".
     h1s = [clean_text(h.get_text()) for h in root.find_all("h1")]
-    h1s = [h for h in h1s if h] or [clean_text(h.get_text()) for h in soup.find_all("h1")]
-    h1s = [h for h in h1s if h]
+    h1s = [h for h in h1s if h] or [h for h in page_h1s if h]
     outline = [(h.name, " ".join(h.get_text().split())) for h in root.find_all(["h2", "h3"])]
 
     body_class = " ".join((soup.body.get("class") or []) if soup.body else [])
@@ -518,6 +530,12 @@ def extract(html, final_url, mode):
             excerpt = " ".join(first_p.get_text().split())
 
     body_md = html_to_md(str(root), heading_style="ATX").strip() if mode == "full" else ""
+    # The note prints the page H1 above the body, so a body that opens with the
+    # same heading would show it twice.
+    if h1s and body_md.startswith("# "):
+        first, _, rest = body_md.partition("\n")
+        if clean_text(first[2:]) == h1s[0]:
+            body_md = rest.strip()
 
     path_segments = [s for s in urllib.parse.urlsplit(final_url).path.split("/") if s]
     title = clean_text(soup.title.get_text()) if soup.title else None
@@ -1155,6 +1173,7 @@ def main():
         # reporting one. New date information is a reason to refetch, not to skip.
         known_lastmod = known.get("lastmod") if known else None
         fresh = bool(known) and known.get("mode") == mode and not args.full and (
+            known.get("extract_version") == EXTRACT_VERSION) and (
             not lastmod or (bool(known_lastmod) and lastmod <= known_lastmod)
         )
 
@@ -1217,6 +1236,7 @@ def main():
             "file": entry.get("file"),  # assigned after we know the full path set
             "hash": data["hash"],
             "mode": mode,
+            "extract_version": EXTRACT_VERSION,
             "lastmod": lastmod or entry.get("lastmod"),
             "crawled": today,
             "status": status,

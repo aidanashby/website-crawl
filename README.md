@@ -8,12 +8,19 @@ The `Crawl Website.cmd` launcher is Windows-only. `crawl.py` itself runs anywher
 
 ## Running it
 
-Double-click **`Crawl Website.cmd`**. It first checks that the `venv` and its packages are present (under a second) and, if not, offers to install Python 3.12 (via winget) and set up the environment for you. Then enter a URL and choose:
+Double-click **`Crawl Website.cmd`**. It first checks that the `venv` and its packages are present (under a second) and, if not, offers to install Python 3.12 (via winget) and set up the environment for you. Then enter a URL and answer two questions. Each waits 15 seconds, then takes its default.
 
-- **N — New and changed pages** (default). Fetches pages new since the last run, plus any the sitemap flags as modified.
+**Which pages?**
+
+- **N — New and changed pages only** (default). Fetches pages new since the last run, plus any the sitemap flags as modified.
 - **F — Full re-fetch**. Re-fetches everything and rewrites only the notes whose rendered output actually changed, so the file timestamps show what moved.
 
-Both modes delete notes for pages that are no longer on the site. See **Pages that disappear** below.
+**What to save for each page?**
+
+- **P — Page content** (default). The page's main text as Markdown, in its note. Menus, header, footer and sidebars are left out. See **Page content** below.
+- **E — Excerpts only.** The meta description or first paragraph.
+
+Changing the second answer from the last run re-reads every page, even with N, because the saved text is different. Every combination deletes notes for pages that are no longer on the site. See **Pages that disappear** below.
 
 Or from a terminal:
 
@@ -86,6 +93,23 @@ crawled/
 Open the domain folder directly in Obsidian. A page with children lives inside its own folder and takes that folder's name, so a section landing page and its children never collide. It is named after the folder rather than `index.md` because Obsidian labels a graph node with its filename, and a vault full of `index.md` files shows a row of identical nodes you can only tell apart by hovering. The homepage is `home.md` for the same reason.
 
 The rule is mechanical and reverses cleanly, and every note carries its own `url` in the frontmatter, which stays the authority for what a note actually is. Notes whose path changes have their old file removed on the next crawl.
+
+## Page content
+
+Each page has one file: its note. The note holds the page's metadata and links, and either the main text or an excerpt, depending on the second launcher question (`--full-text` on the command line gives the main text).
+
+The saved text is the page's own content. Left out: `<nav>`, `<footer>`, `<aside>`, menus and other furniture matched by class or id, and a `<header>` that sits outside `<main>` and `<article>` (the site masthead). Two kinds of header stay, because they are content:
+
+- a `<header>` inside `<main>` or `<article>`, which is that content's title block;
+- a `<header>` holding the page's `<h1>`, which is where many themes put the H1 and an intro paragraph.
+
+The H1 is printed once, by the note, so the saved text does not repeat it.
+
+Links are read from the whole page before anything is removed, so links in the header, menu and footer are still reported (`links_out_nav`, the report's link sections, the graph rules below). Only their text is kept out of the saved content. A link in a masthead `<header>` with no menu class is tagged as a content link, as before.
+
+Word count, the outline, the thin-content check and the content hash are measured on the saved text, so a vault crawled before this rule shifts slightly. The crawler records which extraction rules wrote each page (`extract_version` in `manifest.json`) and re-fetches any older page on the next run, even with N.
+
+Content added by JavaScript is not captured. There is no copy of the raw HTML.
 
 ## What the graph shows
 

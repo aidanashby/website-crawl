@@ -57,13 +57,27 @@ if "%URL%"=="" (
 )
 
 echo.
+echo   Which pages?
 echo   [N]  New and changed pages only   (default)
 echo   [F]  Full re-fetch                 - re-reads every page
 echo.
+set MODE=
+choice /c NF /n /d N /t 15 /m "  Press N or F (defaults to N in 15s): "
+if errorlevel 2 set MODE=--full
+
+echo.
+echo   What to save for each page?
+echo   [P]  Page content   (default)      - the page's main text, without menus or footer
+echo   [E]  Excerpts only                 - the description or first paragraph
+echo.
+echo   Changing this from the last run re-reads every page, even on [N].
 echo   Either way, notes for pages no longer on the site are deleted.
 echo.
-choice /c NF /n /d N /t 15 /m "  Press N or F (defaults to N in 15s): "
-if errorlevel 2 (set MODE=--full) else (set MODE=)
+choice /c PE /n /d P /t 15 /m "  Press P or E (defaults to P in 15s): "
+if errorlevel 2 goto :run
+set MODE=%MODE% --full-text
+
+:run
 
 echo.
 venv\Scripts\python.exe crawl.py "%URL%" %MODE%
