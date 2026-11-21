@@ -1076,3 +1076,47 @@ def test_page_removed_from_the_site_loses_its_note(site, crawl_run):
     vault = crawl_run("--full-text")
     assert not (vault / "about.md").exists()
     assert (vault / "home.md").exists()
+
+
+class _Resp:
+    def __init__(self, body):
+        self.content = body
+
+
+class _Session:
+    """Serves fixed bodies by URL; a missing URL raises, as a timeout would."""
+    def __init__(self, bodies):
+        self.bodies = bodies
+
+    def get(self, url, timeout=None):
+        if url not in self.bodies:
+            raise crawl.requests.ConnectionError(url)
+        return _Resp(self.bodies[url])
+
+
+def test_failed_child_sitemap_is_recorded():
+    ns = 'xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"'
+    session = _Session({
+        "https://example.com/sitemap.xml": (
+            f'<sitemapindex {ns}><sitemap><loc>https://example.com/post-sitemap.xml</loc></sitemap>'
+            f'<sitemap><loc>https://example.com/page-sitemap.xml</loc></sitemap></sitemapindex>').encode(),
+        "https://example.com/page-sitemap.xml": (
+            f'<urlset {ns}><url><loc>https://example.com/about/</loc></url></urlset>').encode(),
+    })
+    failed = []
+    found = crawl.discover_from_sitemaps(session, ["https://example.com/sitemap.xml"], failed)
+    assert list(found) == ["https://example.com/about/"]
+    assert failed == ["https://example.com/post-sitemap.xml"]
+
+
+def test_failed_sitemap_keeps_unlisted_pages():
+    manifest = {"https://example.com/about/": {}, "https://example.com/blog/a/": {},
+                "https://example.com/old/": {}}
+    seen = {"https://example.com/about/"}
+    vanished = {"https://example.com/old/": 404}
+    # Every sitemap read: unlisted pages and 404s are both gone.
+    assert crawl.gone_pages(manifest, seen, vanished, []) == [
+        "https://example.com/blog/a/", "https://example.com/old/"]
+    # A child sitemap failed: only the server's 404 counts.
+    assert crawl.gone_pages(manifest, seen, vanished, ["https://example.com/post-sitemap.xml"]) == [
+        "https://example.com/old/"]

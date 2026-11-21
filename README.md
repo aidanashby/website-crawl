@@ -161,7 +161,7 @@ Deleted pages are named on screen and listed in the report under **No longer on 
 
 A page counts as gone in two cases:
 
-- **The sitemap no longer lists it.** Every sitemap URL is marked as seen before the freshness check, so a page skipped as unchanged still counts as present. A manifest entry missing from this run's sitemap is genuinely gone.
+- **The sitemap no longer lists it.** Every sitemap URL is marked as seen before the freshness check, so a page skipped as unchanged still counts as present. A manifest entry missing from this run's sitemap is genuinely gone. This case is skipped on a run where any sitemap (for example one child of a sitemap index) could not be fetched or read, because that sitemap's pages are missing from the list without having left the site. The failed sitemaps are named on screen.
 - **The server answers 404 or 410** for a URL the sitemap still carries, which is a stale sitemap entry.
 
 Nothing else counts. A **403** is usually a firewall, and a **timeout or 5xx** is usually temporary; deleting a note over either would throw away a page that still exists. Those stay put and are listed under **Failed to fetch this run** instead, so a note that may have gone stale still surfaces.

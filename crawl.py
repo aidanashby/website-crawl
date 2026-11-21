@@ -344,8 +344,11 @@ def _local(elem):
     return elem.tag.rsplit("}", 1)[-1]
 
 
-def discover_from_sitemaps(session, sitemap_urls):
-    """Walk sitemap and sitemap-index files. Return {url: lastmod or None}."""
+def discover_from_sitemaps(session, sitemap_urls, failed=None):
+    """Walk sitemap and sitemap-index files. Return {url: lastmod or None}.
+
+    Each sitemap that cannot be fetched or parsed is appended to `failed`, when given:
+    its pages are missing from the result, which is not the same as gone from the site."""
     found, seen = {}, set()
     queue = deque(sitemap_urls)
     while queue:
@@ -362,6 +365,8 @@ def discover_from_sitemaps(session, sitemap_urls):
                 body = gzip.decompress(body)
             root = ET.fromstring(body)
         except (requests.RequestException, ET.ParseError, OSError, EOFError):
+            if failed is not None:
+                failed.append(sm)
             continue
         if _local(root) == "sitemapindex":
             for loc in root.iter():
@@ -376,6 +381,14 @@ def discover_from_sitemaps(session, sitemap_urls):
                 if loc is not None and loc.text:
                     found[loc.text.strip()] = lastmod.text.strip()[:10] if lastmod is not None and lastmod.text else None
     return found
+
+
+def gone_pages(manifest, seen, vanished, sitemap_failed):
+    """Pages to report as gone. Missing from the sitemap counts only when every sitemap was read:
+    a child sitemap that failed to load drops its pages from this run without them leaving the site.
+    A 404 or 410 from the server always counts."""
+    unlisted = set() if sitemap_failed else {u for u in manifest if u not in seen}
+    return sorted(unlisted | set(vanished))
 
 
 # --------------------------------------------------------------------- page parse
@@ -1088,12 +1101,18 @@ def main():
         return args.ignore_robots or rp is None or rp.can_fetch(USER_AGENT, u)
 
     sitemap_urls = robot_sitemaps or [urllib.parse.urljoin(start, "/sitemap.xml")]
-    discovered = discover_from_sitemaps(session, sitemap_urls)
+    sitemap_failed = []
+    discovered = discover_from_sitemaps(session, sitemap_urls, sitemap_failed)
     discovered = {normalise_url(u): lm for u, lm in discovered.items() if same_site(u, root_host)}
     link_crawl = not discovered
     if link_crawl:
         print("No usable sitemap - falling back to a link crawl from the homepage.")
         discovered = {start: None}
+    elif sitemap_failed:
+        print(f"{len(sitemap_failed)} sitemap(s) could not be read, so no page counts as gone on this run "
+              "unless the server says so:")
+        for sm in sitemap_failed:
+            print(f"    {sm}")
 
     if not args.include_archives:
         discovered = {u: lm for u, lm in discovered.items() if not is_archive(u)}
@@ -1450,7 +1469,7 @@ def main():
     # blocked run never prunes either, because most of the site was never seen.
     gone = []
     if not link_crawl and not aborted:
-        gone = sorted(set([u for u in manifest if u not in seen]) | set(vanished))
+        gone = gone_pages(manifest, seen, vanished, sitemap_failed)
         for u in gone:
             if args.keep_gone or u not in manifest:
                 continue

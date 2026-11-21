@@ -4,6 +4,10 @@ Notable changes to website-crawl. Format follows [Keep a Changelog](https://keep
 
 ## [Unreleased]
 
+### Fixed
+
+- A child sitemap that failed to load (timeout, error page, bad XML) no longer deletes the notes for its pages. On such a run, only a 404 or 410 from the server counts a page as gone, and the failed sitemaps are named on screen.
+
 ### Changed
 
 - `Crawl Website.cmd` asks two questions: which pages (new and changed, or full re-fetch) and what to save (page content, or excerpts only), giving four combinations. Page content is the default. Before, the launcher's "F" passed `--full` only, which re-fetches but does not store page text, so the launcher could not save page bodies at all.
